@@ -31,6 +31,8 @@ ssh -i ../castaneda_drea_bot/secrets/oracle-drea.key opc@141.253.112.50 'cd /opt
 
 ## Useful Server Commands
 
+These are the main day-to-day commands for the second bot.
+
 Open an SSH session:
 
 ```bash
@@ -49,6 +51,18 @@ Restart bot:
 sudo systemctl restart translator-drea-bot
 ```
 
+Stop bot:
+
+```bash
+sudo systemctl stop translator-drea-bot
+```
+
+Start bot again:
+
+```bash
+sudo systemctl start translator-drea-bot
+```
+
 Watch live logs:
 
 ```bash
@@ -59,4 +73,20 @@ Show recent logs:
 
 ```bash
 sudo journalctl -u translator-drea-bot -n 100 --no-pager
+```
+
+Check that both bots are running:
+
+```bash
+systemctl is-active castaneda-drea-bot
+systemctl is-active translator-drea-bot
+```
+
+## After Changing Local Settings
+
+If you change `.env` locally, copy it to Oracle and restart the bot:
+
+```bash
+scp -i ../castaneda_drea_bot/secrets/oracle-drea.key .env opc@141.253.112.50:/opt/translator_drea_bot/.env
+ssh -i ../castaneda_drea_bot/secrets/oracle-drea.key opc@141.253.112.50 'sudo systemctl restart translator-drea-bot && sudo systemctl status translator-drea-bot --no-pager'
 ```
