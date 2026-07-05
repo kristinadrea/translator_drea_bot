@@ -46,6 +46,8 @@ CREATE TABLE IF NOT EXISTS message_map (
 
 conn.commit()
 
+TELEGRAM_CAPTION_LIMIT = 1024
+TELEGRAM_TEXT_LIMIT = 4096
 MEDIA_GROUP_WAIT_SECONDS = 2.5
 pending_media_groups = {}
 pending_media_group_tasks = {}
@@ -70,6 +72,43 @@ def get_en_id(ru_id):
 
 def translate(text: str) -> str:
     return GoogleTranslator(source='ru', target='en').translate(text)
+
+
+def split_text(text: str, limit: int = TELEGRAM_TEXT_LIMIT):
+    text = text.strip()
+
+    if not text:
+        return []
+
+    chunks = []
+    current = ""
+
+    for paragraph in text.splitlines():
+        paragraph = paragraph.strip()
+
+        if not paragraph:
+            continue
+
+        separator = "\n" if current else ""
+
+        if len(current) + len(separator) + len(paragraph) <= limit:
+            current = f"{current}{separator}{paragraph}"
+            continue
+
+        if current:
+            chunks.append(current)
+            current = ""
+
+        while len(paragraph) > limit:
+            chunks.append(paragraph[:limit])
+            paragraph = paragraph[limit:]
+
+        current = paragraph
+
+    if current:
+        chunks.append(current)
+
+    return chunks
 
 
 def get_message_text(message) -> str:
@@ -109,43 +148,64 @@ def build_input_media(message, caption=None):
 
 
 async def send_single_post(context: ContextTypes.DEFAULT_TYPE, message, translated: str):
-    caption = translated or None
+    caption = translated if translated and len(translated) <= TELEGRAM_CAPTION_LIMIT else None
+    send_text_after_media = translated if translated and not caption else ""
 
     if message.photo:
-        return await context.bot.send_photo(
+        sent = await context.bot.send_photo(
             chat_id=EN_CHANNEL_ID,
             photo=message.photo[-1].file_id,
             caption=caption,
         )
+        await send_text_messages(context, send_text_after_media)
+        return sent
 
     if message.video:
-        return await context.bot.send_video(
+        sent = await context.bot.send_video(
             chat_id=EN_CHANNEL_ID,
             video=message.video.file_id,
             caption=caption,
         )
+        await send_text_messages(context, send_text_after_media)
+        return sent
 
     if message.audio:
-        return await context.bot.send_audio(
+        sent = await context.bot.send_audio(
             chat_id=EN_CHANNEL_ID,
             audio=message.audio.file_id,
             caption=caption,
         )
+        await send_text_messages(context, send_text_after_media)
+        return sent
 
     if message.document:
-        return await context.bot.send_document(
+        sent = await context.bot.send_document(
             chat_id=EN_CHANNEL_ID,
             document=message.document.file_id,
             caption=caption,
         )
+        await send_text_messages(context, send_text_after_media)
+        return sent
 
     if translated:
-        return await context.bot.send_message(
-            chat_id=EN_CHANNEL_ID,
-            text=translated,
-        )
+        sent_messages = await send_text_messages(context, translated)
+        return sent_messages[0] if sent_messages else None
 
     return None
+
+
+async def send_text_messages(context: ContextTypes.DEFAULT_TYPE, text: str):
+    sent_messages = []
+
+    for chunk in split_text(text):
+        sent_messages.append(
+            await context.bot.send_message(
+                chat_id=EN_CHANNEL_ID,
+                text=chunk,
+            )
+        )
+
+    return sent_messages
 
 
 async def flush_media_group(context: ContextTypes.DEFAULT_TYPE, media_group_id: str):
@@ -164,6 +224,7 @@ async def flush_media_group(context: ContextTypes.DEFAULT_TYPE, media_group_id: 
 
     media = []
     ru_ids = []
+    group_caption = translated if len(translated) <= TELEGRAM_CAPTION_LIMIT else ""
 
     for index, item in enumerate(messages):
         if get_en_id(item.message_id):
@@ -171,7 +232,7 @@ async def flush_media_group(context: ContextTypes.DEFAULT_TYPE, media_group_id: 
 
         input_media = build_input_media(
             item,
-            caption=translated if index == 0 else None,
+            caption=group_caption if index == 0 else None,
         )
 
         if input_media:
@@ -203,6 +264,8 @@ async def flush_media_group(context: ContextTypes.DEFAULT_TYPE, media_group_id: 
             chat_id=EN_CHANNEL_ID,
             media=media,
         )
+        if translated and not group_caption:
+            await send_text_messages(context, translated)
     except Exception as exc:
         print("MEDIA_GROUP_FALLBACK:", media_group_id, exc)
         sent_messages = []
@@ -289,13 +352,14 @@ async def handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.edit_message_caption(
                 chat_id=EN_CHANNEL_ID,
                 message_id=en_id,
-                caption=translated
+                caption=translated[:TELEGRAM_CAPTION_LIMIT]
             )
         else:
+            chunks = split_text(translated)
             await context.bot.edit_message_text(
                 chat_id=EN_CHANNEL_ID,
                 message_id=en_id,
-                text=translated
+                text=chunks[0] if chunks else translated
             )
 
         print("UPDATED:", ru_id, "->", en_id)
