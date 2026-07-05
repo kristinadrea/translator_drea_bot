@@ -151,6 +151,14 @@ async def send_single_post(context: ContextTypes.DEFAULT_TYPE, message, translat
     caption = translated if translated and len(translated) <= TELEGRAM_CAPTION_LIMIT else None
     send_text_after_media = translated if translated and not caption else ""
 
+    if message.audio:
+        sent = await context.bot.send_audio(
+            chat_id=EN_CHANNEL_ID,
+            audio=message.audio.file_id,
+        )
+        await send_text_messages(context, translated)
+        return sent
+
     if message.photo:
         sent = await context.bot.send_photo(
             chat_id=EN_CHANNEL_ID,
@@ -164,15 +172,6 @@ async def send_single_post(context: ContextTypes.DEFAULT_TYPE, message, translat
         sent = await context.bot.send_video(
             chat_id=EN_CHANNEL_ID,
             video=message.video.file_id,
-            caption=caption,
-        )
-        await send_text_messages(context, send_text_after_media)
-        return sent
-
-    if message.audio:
-        sent = await context.bot.send_audio(
-            chat_id=EN_CHANNEL_ID,
-            audio=message.audio.file_id,
             caption=caption,
         )
         await send_text_messages(context, send_text_after_media)
@@ -221,10 +220,15 @@ async def flush_media_group(context: ContextTypes.DEFAULT_TYPE, media_group_id: 
 
     text = next((get_message_text(item) for item in messages if get_message_text(item)), "")
     translated = translate(text) if text else ""
+    has_audio = any(item.audio for item in messages)
 
     media = []
     ru_ids = []
-    group_caption = translated if len(translated) <= TELEGRAM_CAPTION_LIMIT else ""
+    group_caption = (
+        translated
+        if translated and not has_audio and len(translated) <= TELEGRAM_CAPTION_LIMIT
+        else ""
+    )
 
     for index, item in enumerate(messages):
         if get_en_id(item.message_id):
